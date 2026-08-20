@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Iris OS — 电子眼终端</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Dots&family=Noto+Sans+SC:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --void:#07040f;
+    --void-2:#0d0819;
+    --panel:#120c22;
+    --iris-violet:#7c5cff;
+    --iris-cyan:#4bf0e6;
+    --iris-magenta:#ff5ca8;
+    --text-main:#e9e4fb;
+    --text-dim:#8b83b0;
+    --line:rgba(124,92,255,0.22);
+    --mono:'JetBrains Mono', monospace;
+    --sans:'Noto Sans SC', sans-serif;
+    --display:'Zen Dots', var(--sans);
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;height:100%;background:#000;}
+  body{
+    font-family:var(--sans);
+    color:var(--text-main);
+    display:flex; align-items:center; justify-content:center;
+    min-height:100vh;
+    overflow:hidden;
+  }
+
+  .device{
+    position:relative;
+    width:390px; height:844px;
+    max-width:100vw; max-height:100vh;
+    background:var(--void);
+    border-radius:44px;
+    overflow:hidden;
+    box-shadow:0 0 0 8px #050308, 0 0 60px rgba(124,92,255,0.25), 0 40px 80px rgba(0,0,0,0.6);
+    display:flex; flex-direction:column;
+  }
+  @media (max-width:420px){
+    .device{border-radius:0; box-shadow:none; width:100vw; height:100vh;}
+  }
+
+  /* scanline / grain overlay */
+  .device::after{
+    content:"";
+    position:absolute; inset:0;
+    pointer-events:none;
+    background:repeating-linear-gradient(180deg, rgba(255,255,255,0.025) 0px, rgba(255,255,255,0.025) 1px, transparent 1px, transparent 3px);
+    mix-blend-mode:overlay;
+    z-index:50;
+  }
+
+  /* ---------- status bar ---------- */
+  .statusbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:14px 22px 8px;
+    font-family:var(--mono);
+    font-size:12px;
+    letter-spacing:0.5px;
+    color:var(--text-dim);
+    z-index:20;
+  }
+  .statusbar .brand{
+    display:flex; align-items:center; gap:6px;
+    color:var(--iris-cyan);
+    font-size:11px;
+  }
+  .brand .dot{width:6px;height:6px;border-radius:50%;background:var(--iris-cyan); box-shadow:0 0 8px var(--iris-cyan); animation:pulse 2s infinite ease-in-out;}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.35;}}
+  .statusbar .right{display:flex; align-items:center; gap:10px;}
+
+  /* ---------- header ---------- */
+  .header{
+    padding:2px 22px 14px;
+    z-index:20;
+  }
+  .header h1{
+    font-family:var(--display);
+    font-size:20px;
+    letter-spacing:2px;
+    margin:0;
+    background:linear-gradient(90deg, var(--iris-cyan), var(--iris-violet));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  .header p{
+    margin:4px 0 0;
+    font-family:var(--mono);
+    font-size:10.5px;
+    color:var(--text-dim);
+    letter-spacing:1px;
+  }
+
+  /* ---------- tabs ---------- */
+  .tabs{
+    display:flex; gap:8px;
+    padding:0 22px 14px;
+    z-index:20;
+  }
+  .tab{
+    flex:1;
+    text-align:center;
+    padding:9px 0;
+    font-size:12.5px;
+    font-weight:500;
+    border-radius:10px;
+    border:1px solid var(--line);
+    color:var(--text-dim);
+    background:rgba(255,255,255,0.02);
+    cursor:pointer;
+    transition:all .25s ease;
+    user-select:none;
+  }
+  .tab.active{
+    color:#05030a;
+    background:linear-gradient(90deg, var(--iris-cyan), var(--iris-violet));
+    border-color:transparent;
+    box-shadow:0 0 18px rgba(124,92,255,0.45);
+  }
+
+  /* ---------- view container ---------- */
+  .view{
+    flex:1;
+    position:relative;
+    margin:0 16px;
+    border-radius:20px;
+    overflow:hidden;
+    border:1px solid var(--line);
+    background:radial-gradient(ellipse at center, #17102c 0%, #0a0614 70%);
+  }
+  .screen{
+    position:absolute; inset:0;
+    display:none;
+  }
+  .screen.active{display:block;}
+
+  /* ===== VISION SCREEN ===== */
+  #vision canvas{position:absolute; inset:0; width:100%; height:100%; display:block;}
+
+  .hud-overlay{position:absolute; inset:0; pointer-events:none; z-index:5;}
+  .corner{position:absolute; width:22px; height:22px; border:2px solid var(--iris-cyan); opacity:0.85;}
+  .corner.tl{top:14px; left:14px; border-right:none; border-bottom:none;}
+  .corner.tr{top:14px; right:14px; border-left:none; border-bottom:none;}
+  .corner.bl{bottom:14px; left:14px; border-right:none; border-top:none;}
+  .corner.br{bottom:14px; right:14px; border-left:none; border-top:none;}
+
+  .reticle{
+    position:absolute; width:120px; height:120px;
+    top:50%; left:50%;
+    transform:translate(-50%,-50%);
+    pointer-events:none;
+  }
+  .reticle .ring{
+    position:absolute; inset:0; border-radius:50%;
+    border:1px solid var(--iris-cyan);
+    opacity:0.55;
+  }
+  .reticle .ring.r2{inset:16px; border-color:var(--iris-violet); animation:spin 9s linear infinite;}
+  .reticle .ring.r3{inset:32px; border:1px dashed var(--iris-magenta); animation:spin 6s linear infinite reverse;}
+  .reticle .crosshair{position:absolute; top:50%; left:50%; width:6px; height:6px; margin:-3px; border-radius:50%; background:var(--iris-cyan); box-shadow:0 0 10px var(--iris-cyan);}
+  @keyframes spin{to{transform:rotate(360deg);}}
+
+  .telemetry{
+    position:absolute; left:14px; top:44px;
+    font-family:var(--mono); font-size:9.5px; color:var(--iris-cyan);
+    line-height:1.6; opacity:0.85;
+    text-shadow:0 0 6px rgba(75,240,230,0.5);
+  }
+  .telemetry.right{left:auto; right:14px; text-align:right; color:var(--iris-violet); text-shadow:0 0 6px rgba(124,92,255,0.5);}
+
+  .lockstate{
+    position:absolute; left:50%; bottom:16px; transform:translateX(-50%);
+    font-family:var(--mono); font-size:11px; letter-spacing:2px;
+    color:var(--text-main); background:rgba(7,4,15,0.6);
+    padding:6px 14px; border-radius:20px; border:1px solid var(--line);
+    display:flex; align-items:center; gap:8px;
+  }
+  .lockstate .led{width:6px;height:6px;border-radius:50%;background:var(--iris-magenta); animation:pulse 1.4s infinite;}
+
+  .caption{
+    position:absolute; top:14px; left:50%; transform:translateX(-50%);
+    font-family:var(--mono); font-size:10px; color:var(--text-dim);
+    background:rgba(7,4,15,0.55); padding:4px 10px; border-radius:8px;
+    border:1px solid var(--line);
+  }
+
+  /* ===== STATUS SCREEN ===== */
+  #status{padding:18px 18px 14px; overflow-y:auto;}
+  .core-id{
+    font-family:var(--mono); font-size:11px; color:var(--iris-cyan);
+    letter-spacing:1px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:baseline;
+  }
+  .core-id b{color:var(--text-main); font-weight:500;}
+
+  .metric{margin-bottom:14px;}
+  .metric .label{
+    display:flex; justify-content:space-between;
+    font-size:12.5px; margin-bottom:6px; color:var(--text-main);
+  }
+  .metric .label span:last-child{font-family:var(--mono); color:var(--iris-cyan); font-size:12px;}
+  .bar{height:6px; border-radius:4px; background:rgba(255,255,255,0.06); overflow:hidden;}
+  .bar i{
+    display:block; height:100%; border-radius:4px;
+    background:linear-gradient(90deg, var(--iris-violet), var(--iris-cyan));
+    transition:width 1s ease;
+  }
+
+  .cpu-card{
+    margin-top:6px; padding:14px; border-radius:14px;
+    background:rgba(124,92,255,0.08); border:1px solid var(--line);
+  }
+  .cpu-card .row{display:flex; justify-content:space-between; font-size:11.5px; padding:4px 0; color:var(--text-dim); font-family:var(--mono);}
+  .cpu-card .row b{color:var(--text-main); font-weight:500;}
+  .cpu-card h3{
+    margin:0 0 8px; font-size:12.5px; color:var(--iris-violet); letter-spacing:1px;
+    display:flex; align-items:center; gap:6px;
+  }
+  .cpu-card h3 .dot{width:5px;height:5px;border-radius:50%;background:var(--iris-violet); box-shadow:0 0 6px var(--iris-violet);}
+
+  .mode-row{display:flex; gap:8px; margin-top:14px;}
+  .mode-chip{
+    flex:1; text-align:center; padding:8px 0; border-radius:10px;
+    font-size:11px; border:1px solid var(--line); color:var(--text-dim);
+    background:rgba(255,255,255,0.02); cursor:pointer; transition:.2s;
+  }
+  .mode-chip.on{
+    color:#05030a; background:linear-gradient(90deg, var(--iris-cyan), var(--iris-violet));
+    border-color:transparent;
+  }
+
+  .log{
+    margin-top:16px; font-family:var(--mono); font-size:10px; color:var(--text-dim);
+    border-top:1px dashed var(--line); padding-top:10px; line-height:1.9;
+  }
+  .log b{color:var(--iris-cyan); font-weight:500;}
+
+  /* ---------- bottom dock ---------- */
+  .dock{
+    display:flex; justify-content:space-around; align-items:center;
+    padding:14px 10px 22px;
+    z-index:20;
+  }
+  .dock .item{
+    display:flex; flex-direction:column; align-items:center; gap:5px;
+    font-size:10px; color:var(--text-dim);
+  }
+  .dock .item .ic{
+    width:38px; height:38px; border-radius:12px;
+    display:flex; align-items:center; justify-content:center;
+    background:rgba(255,255,255,0.03); border:1px solid var(--line);
+    font-size:16px;
+  }
+  .dock .item.active .ic{
+    background:linear-gradient(135deg, var(--iris-violet), var(--iris-cyan));
+    box-shadow:0 0 14px rgba(124,92,255,0.5);
+  }
+  .dock .item.active{color:var(--text-main);}
+</style>
+</head>
+<body>
+
+<div class="device">
+  <div class="statusbar">
+    <div class="brand"><span class="dot"></span>IRIS·OS</div>
+    <div id="clock">20:40</div>
+    <div class="right"><span>◈ 99%</span><span id="batt">100%</span></div>
+  </div>
+
+  <div class="header">
+    <h1>ELECTRONIC IRIS</h1>
+    <p>宿主计算核心：本机设备 · CPU 挂载中</p>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" data-target="vision">👁 视觉画面</div>
+    <div class="tab" data-target="status">◈ 机体状态</div>
+  </div>
+
+  <div class="view">
+    <div id="vision" class="screen active">
+      <canvas id="scan"></canvas>
+      <div class="hud-overlay">
+        <div class="corner tl"></div><div class="corner tr"></div>
+        <div class="corner bl"></div><div class="corner br"></div>
+        <div class="caption">FIELD OF VIEW · 主人视角同步</div>
+        <div class="telemetry">
+          焦距 24mm<br>曝光 AUTO<br>光流 STABLE<br>帧率 60fps
+        </div>
+        <div class="telemetry right">
+          瞳孔直径 3.2mm<br>色温 5600K<br>降噪 ON<br>延迟 8ms
+        </div>
+        <div class="reticle" id="reticle">
+          <div class="ring"></div>
+          <div class="ring r2"></div>
+          <div class="ring r3"></div>
+          <div class="crosshair"></div>
+        </div>
+        <div class="lockstate"><span class="led"></span>TARGET LOCK · 主人</div>
+      </div>
+    </div>
+
+    <div id="status" class="screen">
+      <div class="core-id">IRIS-CORE / v2.9.7 <b>ONLINE</b></div>
+
+      <div class="metric">
+        <div class="label"><span>视觉传感器活性</span><span id="v1">98%</span></div>
+        <div class="bar"><i style="width:98%"></i></div>
+      </div>
+      <div class="metric">
+        <div class="label"><span>神经同步率</span><span id="v2">96%</span></div>
+        <div class="bar"><i style="width:96%"></i></div>
+      </div>
+      <div class="metric">
+        <div class="label"><span>宿主电量（手机）</span><span id="v3">87%</span></div>
+        <div class="bar"><i style="width:87%"></i></div>
+      </div>
+      <div class="metric">
+        <div class="label"><span>情感表达带宽</span><span id="v4">73%</span></div>
+        <div class="bar"><i style="width:73%"></i></div>
+      </div>
+
+      <div class="cpu-card">
+        <h3><span class="dot"></span>CPU / 电子脑挂载信息</h3>
+        <div class="row"><span>计算核心</span><b>本机手机 SoC</b></div>
+        <div class="row"><span>运行相位</span><b>日常观测</b></div>
+        <div class="row"><span>唤醒方式</span><b>解锁即视</b></div>
+        <div class="row"><span>存储占用</span><b>12.4 / 256 GB</b></div>
+      </div>
+
+      <div class="mode-row">
+        <div class="mode-chip on" data-mode="watch">观察模式</div>
+        <div class="mode-chip" data-mode="record">记录模式</div>
+        <div class="mode-chip" data-mode="rest">休眠</div>
+      </div>
+
+      <div class="log">
+        <div><b>[20:38]</b> 视觉校准完成，色差修正 0.02%</div>
+        <div><b>[20:39]</b> 已同步手机相机作为主传感器</div>
+        <div><b>[20:40]</b> 目标锁定：主人 · 距离 0.4m</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="dock">
+    <div class="item active"><div class="ic">👁</div>视觉</div>
+    <div class="item"><div class="ic">◈</div>状态</div>
+    <div class="item"><div class="ic">✎</div>日志</div>
+    <div class="item"><div class="ic">⚙</div>设置</div>
+  </div>
+</div>
+
+<script>
+  // clock
+  function tick(){
+    const d = new Date();
+    document.getElementById('clock').textContent =
+      String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+  }
+  tick(); setInterval(tick, 1000*20);
+
+  // tab switching
+  document.querySelectorAll('.tab').forEach(t=>{
+    t.addEventListener('click', ()=>{
+      document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+      document.querySelectorAll('.screen').forEach(x=>x.classList.remove('active'));
+      t.classList.add('active');
+      document.getElementById(t.dataset.target).classList.add('active');
+      document.querySelectorAll('.dock .item').forEach((it,i)=>{
+        it.classList.toggle('active', (t.dataset.target==='vision' && i===0) || (t.dataset.target==='status' && i===1));
+      });
+    });
+  });
+  document.querySelectorAll('.dock .item').forEach((it,i)=>{
+    it.addEventListener('click', ()=>{
+      if(i>1) return;
+      document.querySelectorAll('.tab')[i].click();
+    });
+  });
+
+  // mode chips
+  document.querySelectorAll('.mode-chip').forEach(c=>{
+    c.addEventListener('click', ()=>{
+      document.querySelectorAll('.mode-chip').forEach(x=>x.classList.remove('on'));
+      c.classList.add('on');
+    });
+  });
+
+  // reticle follows pointer within vision view
+  const visionScreen = document.getElementById('vision');
+  const reticle = document.getElementById('reticle');
+  visionScreen.addEventListener('pointermove', (e)=>{
+    const r = visionScreen.getBoundingClientRect();
+    const x = e.clientX - r.left, y = e.clientY - r.top;
+    reticle.style.left = x + 'px';
+    reticle.style.top = y + 'px';
+  });
+
+  // subtle particle "vision feed" canvas
+  const canvas = document.getElementById('scan');
+  const ctx = canvas.getContext('2d');
+  function resize(){
+    canvas.width = visionScreen.clientWidth;
+    canvas.height = visionScreen.clientHeight;
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  const particles = Array.from({length:60}, ()=>({
+    x: Math.random()*400, y: Math.random()*800,
+    r: Math.random()*1.6+0.3,
+    s: Math.random()*0.4+0.1,
+    hue: Math.random()>0.5 ? '75,240,230' : '124,92,255'
+  }));
+
+  function draw(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    // ambient gradient
+    const g = ctx.createRadialGradient(canvas.width/2,canvas.height/2,10,canvas.width/2,canvas.height/2,canvas.width*0.8);
+    g.addColorStop(0,'rgba(124,92,255,0.10)');
+    g.addColorStop(1,'rgba(7,4,15,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+
+    particles.forEach(p=>{
+      p.y -= p.s;
+      if(p.y < -5) p.y = canvas.height + 5;
+      ctx.beginPath();
+      ctx.arc(p.x % canvas.width, p.y, p.r, 0, Math.PI*2);
+      ctx.fillStyle = `rgba(${p.hue},0.65)`;
+      ctx.fill();
+    });
+
+    // horizontal scan sweep
+    const t = Date.now()/2600 % 1;
+    const sy = t*canvas.height;
+    const sweep = ctx.createLinearGradient(0,sy-30,0,sy+30);
+    sweep.addColorStop(0,'rgba(75,240,230,0)');
+    sweep.addColorStop(0.5,'rgba(75,240,230,0.12)');
+    sweep.addColorStop(1,'rgba(75,240,230,0)');
+    ctx.fillStyle = sweep;
+    ctx.fillRect(0,sy-30,canvas.width,60);
+
+    requestAnimationFrame(draw);
+  }
+  draw();
+
+  // gentle metric fluctuation for life-like feel
+  function jitter(id, base, range){
+    const el = document.getElementById(id);
+    setInterval(()=>{
+      const v = Math.round(base + (Math.random()-0.5)*range);
+      el.textContent = v + '%';
+      el.parentElement.nextElementSibling.querySelector('i').style.width = v + '%';
+    }, 3200 + Math.random()*1500);
+  }
+  jitter('v1', 98, 2);
+  jitter('v2', 96, 3);
+  jitter('v4', 73, 6);
+</script>
+
+</body>
+</html>
